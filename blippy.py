@@ -1,8 +1,10 @@
 from typing import List, Optional, Tuple
+from pathlib import Path
 from PIL import Image
 import numpy as np
 import pygame
 import time
+import sys
 import cv2
 import os
 
@@ -67,7 +69,13 @@ def react_to_key(key: int) -> Tuple[Optional[pygame.Surface], Optional[float], O
     gif_surfaces = None
     gif_time = None
 
-    file_name = f'reactions/{key}'
+    # Define the reactions folder as a fixed path
+    if sys.platform.startswith("win"):
+        reactions_folder = Path("reactions")
+    else:
+        reactions_folder = Path("/usr/local/bin/reactions")
+
+    file_name = str(reactions_folder / key)
     png_file = f'{file_name}.png'
     gif_file = f'{file_name}.gif'
     webp_file = f'{file_name}.webp'
@@ -110,8 +118,11 @@ def main() -> None:
     print("\033[94m\u2009\u2009\u2009ESC\033[0m\033[96m\tquit\n")
     print("\033[106m----------------------------\033[0m")
 
-    # Check if folder 'reactions' exists
-    reactions_folder = 'reactions'
+    # Define the reactions folder as a fixed path
+    if sys.platform.startswith("win"):
+        reactions_folder = Path("reactions")
+    else:
+        reactions_folder = Path("/usr/local/bin/reactions")
     if not os.path.exists(reactions_folder):
         current_directory = os.getcwd()
         print(f"\033[1;31m{'Folder not found:'}\033[0m {reactions_folder}")
