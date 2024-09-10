@@ -1,0 +1,15 @@
+
+.venv
+
+.vscode
+
+__pycache__
+
+*.pyc
+
+build/
+
+reactions/
+
+dist/
+
