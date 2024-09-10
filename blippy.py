@@ -7,6 +7,47 @@ import time
 import sys
 import cv2
 import os
+import ctypes
+import subprocess
+
+# Function to set the window always on top for Windows
+def set_window_always_on_top_windows():
+    hwnd = pygame.display.get_wm_info()['window']
+    SetWindowPos = ctypes.windll.user32.SetWindowPos
+    SetWindowPos(hwnd, -1, 0, 0, 0, 0, 0x0001 | 0x0002)
+
+# Function to set the window always on top for macOS
+def set_window_always_on_top_macos():
+    from AppKit import NSApplication, NSApp, NSWindow
+    app = NSApplication.sharedApplication()
+    app.activateIgnoringOtherApps_(True)
+    window = NSApp.windows()[0]
+    window.setLevel_(NSWindow.LevelFloating)
+
+# Function to set the window always on top for Linux (GNOME)
+def set_window_always_on_top_linux():
+    window_id = pygame.display.get_wm_info()['window']
+    subprocess.call(['wmctrl', '-i', '-r', str(window_id), '-b', 'add,above'])
+
+# Function to set the window always on top based on the OS
+def set_window_always_on_top():
+    if sys.platform.startswith('win'):
+        set_window_always_on_top_windows()
+    elif sys.platform.startswith('darwin'):
+        set_window_always_on_top_macos()
+    elif sys.platform.startswith('linux'):
+        set_window_always_on_top_linux()
+
+# Function to reset the window to normal state for Linux (GNOME)
+def reset_window_normal_state_linux():
+    window_id = pygame.display.get_wm_info()['window']
+    subprocess.call(['wmctrl', '-i', '-r', str(window_id), '-b', 'remove,above'])
+
+# Function to set window transparency on Linux
+def set_window_transparency_linux(opacity: float):
+    window_id = pygame.display.get_wm_info()['window']
+    opacity_value = int(opacity * 0xFFFFFFFF)
+    subprocess.call(['xprop', '-id', str(window_id), '-f', '_NET_WM_WINDOW_OPACITY', '32c', '-set', '_NET_WM_WINDOW_OPACITY', str(opacity_value)])
 
 def load_gif(gif_path: str) -> List[Image.Image]:
     """
@@ -144,10 +185,15 @@ def main() -> None:
     # Initialize Pygame
     pygame.init()
 
+    # Variables to track window state
+    always_on_top = False
+    window_frame_visible = True
+
     # Set up display without title bar
     width, height = 500, 500
     screen = pygame.display.set_mode((width, height), pygame.RESIZABLE)
     pygame.display.set_caption("Blippy")
+    green = (0, 255, 0)
 
     # Capture video from webcam
     cap = cv2.VideoCapture(0)
@@ -155,10 +201,12 @@ def main() -> None:
         print("\033[91mError: Could not open webcam\033[0m")
         return
 
-    # Variables to track toggle window frame visibility
-    window_frame_visible = True
+    # Variables to handle zoom
     zoom_level = 1.0
     zoom_step = 0.1
+
+    circle_view = False
+    window_transparency = 1
 
     image_source: Optional[pygame.Surface] = None
     image_time: Optional[float] = None
@@ -214,13 +262,30 @@ def main() -> None:
             surface = pygame.surfarray.make_surface(rgb_frame)
             surface = pygame.transform.rotate(surface, -90)
 
-            # Create a transparent background
-            background = pygame.Surface((width, height))
-            screen.blit(background, (0, 0))
-
             # Scale the frame to fit the screen
             resized_surface = pygame.transform.scale(surface, (width, height))
+
+        # If circle view is enabled, create a circular mask
+        if circle_view:
+            # Create a blank surface with per-pixel alpha
+            backdrop = pygame.Surface((width, height), pygame.SRCALPHA)
+
+            # Fill the surface with a transparent background
+            screen.fill((0, 0, 0, 0))
+
+            backdrop.fill((0, 0, 0, 0))
+
+            # Draw a white circle on the transparent surface
+            pygame.draw.circle(backdrop, (255, 255, 255), (width // 2, height // 2), height // 2, 0)
+
+            # Blit the frame onto the transparent surface blend based on white color (max)
+            backdrop.blit(resized_surface, (0, 0), special_flags=pygame.BLEND_RGBA_MIN)
+
+            # Blit the backdrop onto the screen
+            screen.blit(backdrop, (0, 0))
+        else:  
             screen.blit(resized_surface, (0, 0))
+
 
             # Handle image display
             if image_time is not None and time.time() - image_time <= 5:
@@ -251,8 +316,11 @@ def main() -> None:
                 frame_index += 1
                 clock.tick(30)  # Limit to 30 FPS
 
+
         # Update the entire screen
         pygame.display.flip()
+
+        pygame.display.update()
 
         # Handle events
         for event in pygame.event.get():
@@ -268,15 +336,32 @@ def main() -> None:
                     pygame.display.set_caption("Blippy" if window_frame_visible else "")
                     pygame.display.flip()
                     if not window_frame_visible:
-                        pygame.display.set_mode((width, height), pygame.NOFRAME | pygame.RESIZABLE)
+                        pygame.display.set_mode((width, height), pygame.RESIZABLE | pygame.NOFRAME)
                     else:
                         pygame.display.set_mode((width, height), pygame.RESIZABLE)
+                        # Reset window to normal state 
+                        if sys.platform.startswith('win'):
+                            hwnd = pygame.display.get_wm_info()['window']
+                            SetWindowPos = ctypes.windll.user32.SetWindowPos
+                            SetWindowPos(hwnd, -2, 0, 0, 0, 0, 0x0001 | 0x0002)
+                        elif sys.platform.startswith('linux'):
+                            reset_window_normal_state_linux()
                 elif event.key == pygame.K_f:
                     pygame.display.toggle_fullscreen()
                 elif event.key == pygame.K_UP:
                     zoom_level = min(zoom_level + zoom_step, 5)
                 elif event.key == pygame.K_DOWN:
                     zoom_level = max(zoom_level - zoom_step, 1.0)
+                elif event.key == pygame.K_LEFT:
+                    window_transparency = max(window_transparency - 0.1, 0.1)
+                    window_id = pygame.display.get_wm_info()['window']
+                    opacity_value = int(window_transparency * 0xFFFFFFFF)
+                    subprocess.call(['xprop', '-id', str(window_id), '-f', '_NET_WM_WINDOW_OPACITY', '32c', '-set', '_NET_WM_WINDOW_OPACITY', str(opacity_value)])
+                elif event.key == pygame.K_RIGHT:
+                    window_transparency = min(window_transparency + 0.1, 1.0)
+                    window_id = pygame.display.get_wm_info()['window']
+                    opacity_value = int(window_transparency * 0xFFFFFFFF)
+                    subprocess.call(['xprop', '-id', str(window_id), '-f', '_NET_WM_WINDOW_OPACITY', '32c', '-set', '_NET_WM_WINDOW_OPACITY', str(opacity_value)])
                 elif event.key == pygame.K_o:
                     zoom_level = 1.0
                 elif event.key == pygame.K_i:
@@ -319,6 +404,22 @@ def main() -> None:
                     image_source, image_time, gif_surfaces, gif_time = react_to_key('9')
                 elif event.key == pygame.K_0:
                     image_source, image_time, gif_surfaces, gif_time = react_to_key('0')
+                elif event.key == pygame.K_t:
+                    always_on_top = not always_on_top
+                    window_frame_visible = False
+                    if always_on_top:
+                        pygame.display.set_mode((width, height), pygame.RESIZABLE | pygame.NOFRAME)
+                        set_window_always_on_top()
+                    else:
+                        # Reset window to normal state
+                        if sys.platform.startswith('win'):
+                            hwnd = pygame.display.get_wm_info()['window']
+                            SetWindowPos = ctypes.windll.user32.SetWindowPos
+                            SetWindowPos(hwnd, -2, 0, 0, 0, 0, 0x0001 | 0x0002)
+                        elif sys.platform.startswith('linux'):
+                            reset_window_normal_state_linux()
+                elif event.key == pygame.K_u:
+                    circle_view = not circle_view
 
 if __name__ == "__main__":
     main()
